@@ -85,31 +85,79 @@ check_disk_space() {
     fi
 }
 
-# Function to determine which fetch tool to use based on distribution
-determine_fetch_tool() {
-    print_status "Determining which system info tool to use..."
+# Function to install fetch tool (neofetch or fastfetch)
+install_fetch_tool() {
+    print_status "Installing system info tool..."
     
-    if command_exists pacman; then
-        # Arch Linux - use fastfetch
-        FETCH_TOOL="fastfetch"
-        print_status "Arch Linux detected: using fastfetch"
-    else
-        # All other distributions - use neofetch
-        FETCH_TOOL="neofetch"
-        if command_exists apt; then
-            print_status "Debian/Ubuntu detected: using neofetch"
-        elif command_exists dnf; then
-            print_status "Fedora detected: using neofetch"
-        elif command_exists yum; then
-            print_status "RHEL/CentOS detected: using neofetch"
-        elif command_exists zypper; then
-            print_status "openSUSE detected: using neofetch"
-        else
-            print_status "Unknown distribution: defaulting to neofetch"
-        fi
+    # Try neofetch first
+    print_status "Attempting to install neofetch..."
+    local installed=false
+    set +e  # Temporarily disable exit on error
+    
+    if command_exists apt; then
+        sudo apt update 2>/dev/null
+        sudo apt install -y neofetch 2>/dev/null && installed=true
+    elif command_exists yum; then
+        sudo yum install -y neofetch 2>/dev/null && installed=true
+    elif command_exists dnf; then
+        sudo dnf install -y neofetch 2>/dev/null && installed=true
+    elif command_exists pacman; then
+        sudo pacman -S --needed --noconfirm neofetch 2>/dev/null && installed=true
+    elif command_exists zypper; then
+        sudo zypper install -y neofetch 2>/dev/null && installed=true
     fi
     
-    print_success "Will use $FETCH_TOOL for system information display"
+    set -e  # Re-enable exit on error
+    
+    # Check if neofetch is now available
+    if [ "$installed" = true ] && command_exists neofetch; then
+        FETCH_TOOL="neofetch"
+        print_success "neofetch installed successfully"
+        return 0
+    fi
+    
+    # If neofetch failed, try fastfetch
+    print_warning "neofetch installation failed, trying fastfetch..."
+    installed=false
+    set +e  # Temporarily disable exit on error
+    
+    if command_exists apt; then
+        sudo apt install -y fastfetch 2>/dev/null && installed=true
+    elif command_exists yum; then
+        sudo yum install -y fastfetch 2>/dev/null && installed=true
+    elif command_exists dnf; then
+        sudo dnf install -y fastfetch 2>/dev/null && installed=true
+    elif command_exists pacman; then
+        sudo pacman -S --needed --noconfirm fastfetch 2>/dev/null && installed=true
+    elif command_exists zypper; then
+        sudo zypper install -y fastfetch 2>/dev/null && installed=true
+    fi
+    
+    set -e  # Re-enable exit on error
+    
+    # Check if fastfetch is now available
+    if [ "$installed" = true ] && command_exists fastfetch; then
+        FETCH_TOOL="fastfetch"
+        print_success "fastfetch installed successfully"
+        return 0
+    fi
+    
+    # If both failed, determine which one is already installed
+    if command_exists neofetch; then
+        FETCH_TOOL="neofetch"
+        print_warning "neofetch already installed, using it"
+        return 0
+    elif command_exists fastfetch; then
+        FETCH_TOOL="fastfetch"
+        print_warning "fastfetch already installed, using it"
+        return 0
+    fi
+    
+    # If nothing is available, warn but continue
+    FETCH_TOOL="fastfetch"
+    print_warning "Could not install neofetch or fastfetch. The .zshrc will use fastfetch by default."
+    print_warning "You can install one manually later: sudo apt install neofetch (or fastfetch)"
+    return 1
 }
 
 # Function to install lolcat with fallback methods
@@ -245,11 +293,6 @@ install_lolcat() {
 install_packages() {
     print_status "Detecting package manager and installing dependencies..."
     
-    # Ensure FETCH_TOOL is set
-    if [ -z "$FETCH_TOOL" ]; then
-        determine_fetch_tool
-    fi
-    
     # Temporarily disable exit on error to handle package installation failures gracefully
     set +e
     
@@ -257,17 +300,17 @@ install_packages() {
         # Debian/Ubuntu
         print_status "Using apt package manager (Debian/Ubuntu)"
         sudo apt update
-        sudo apt install -y zsh "$FETCH_TOOL" neovim build-essential
+        sudo apt install -y zsh neovim build-essential
     elif command_exists yum; then
         # RHEL/CentOS/Fedora
         print_status "Using yum package manager (RHEL/CentOS/Fedora)"
         sudo yum update -y
-        sudo yum install -y zsh "$FETCH_TOOL" neovim gcc gcc-c++ make
+        sudo yum install -y zsh neovim gcc gcc-c++ make
     elif command_exists dnf; then
         # Fedora/RHEL-based (AlmaLinux, Rocky Linux)
         print_status "Using dnf package manager (Fedora/RHEL-based)"
         sudo dnf update -y
-        sudo dnf install -y zsh "$FETCH_TOOL" neovim gcc gcc-c++ make
+        sudo dnf install -y zsh neovim gcc gcc-c++ make
     elif command_exists pacman; then
         # Arch Linux
         # NOTE: We use -S (not -Syu) to avoid full system upgrade which can brick
@@ -283,14 +326,14 @@ install_packages() {
             exit 1
         fi
         
-        sudo pacman -S --needed --noconfirm zsh "$FETCH_TOOL" neovim base-devel
+        sudo pacman -S --needed --noconfirm zsh neovim base-devel
     elif command_exists zypper; then
         # openSUSE
         print_status "Using zypper package manager (openSUSE)"
         sudo zypper refresh
-        sudo zypper install -y zsh "$FETCH_TOOL" neovim gcc gcc-c++ make
+        sudo zypper install -y zsh neovim gcc gcc-c++ make
     else
-        print_error "Unsupported package manager. Please install zsh, $FETCH_TOOL, and neovim manually."
+        print_error "Unsupported package manager. Please install zsh and neovim manually."
         set -e
         exit 1
     fi
@@ -305,6 +348,9 @@ install_packages() {
     fi
     
     print_success "Core packages installed successfully"
+    
+    # Install fetch tool separately (neofetch or fastfetch)
+    install_fetch_tool || true
     
     # Install lolcat separately (optional, won't fail the script)
     install_lolcat || true
@@ -438,13 +484,18 @@ create_zshrc() {
 
 # Function to update .zshrc with the correct fetch tool
 update_zshrc_fetch_tool() {
-    print_status "Updating .zshrc to use $FETCH_TOOL..."
-    
-    # Ensure FETCH_TOOL is set
+    # Ensure FETCH_TOOL is set (default to fastfetch if not set)
     if [ -z "$FETCH_TOOL" ]; then
-        print_error "FETCH_TOOL is not set. Cannot update .zshrc."
-        return 1
+        if command_exists neofetch; then
+            FETCH_TOOL="neofetch"
+        elif command_exists fastfetch; then
+            FETCH_TOOL="fastfetch"
+        else
+            FETCH_TOOL="fastfetch"  # Default fallback
+        fi
     fi
+    
+    print_status "Updating .zshrc to use $FETCH_TOOL..."
     
     # Replace fastfetch with the determined tool in .zshrc
     if [ -f "$HOME/.zshrc" ]; then
@@ -549,7 +600,6 @@ main() {
     
     # Start installation
     create_directories
-    determine_fetch_tool
     install_packages
     install_fzf
     if ! install_zoxide; then
