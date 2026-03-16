@@ -98,4 +98,4 @@ mkcd(){command mkdir -p -- "$1" && cd "$1";}
 chpwd(){ls}
 
 # Run fastfetch on shell startup
-clear && fastfetch
+clear && fastfetch --pipe false
